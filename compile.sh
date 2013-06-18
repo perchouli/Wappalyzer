@@ -2,7 +2,7 @@
 cat share/js/wappalyzer.js drivers/php/js/driver.js > app.js
 echo "
 var request = require('request'), fs = require('fs'), url = process.argv[2];
-fs.readFile('share/apps.json', 'utf8', function (error, data) {
+fs.readFile('$PWD/share/apps.json', 'utf8', function (error, data) {
   if (error) {
     return console.log(error);
   }

@@ -1,4 +1,9 @@
 wappalyzer-chrome.zip
 wappalyzer-firefox.xpi
-.windows_zip/*
-!.windows_zip/Download 7-Zip.hta
+wappalyzer.xpi
+
+drivers/**/apps.json
+drivers/**/wappalyzer.js
+drivers/**/icons/*.png
+
+node_modules/*

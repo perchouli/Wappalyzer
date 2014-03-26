@@ -8,7 +8,9 @@
 	var w = wappalyzer,
 		firstRun = false,
 		upgraded = false,
-		tab, tabCache = {};
+		tab,
+		tabCache = {},
+		headersCache = {};
 
 	w.driver = {
 		/**
@@ -61,6 +63,10 @@
 			} catch(e) { }
 
 			chrome.extension.onRequest.addListener(function(request, sender, sendResponse) {
+				var
+					hostname,
+					a = document.createElement('a');
+
 				if ( typeof request.id != 'undefined' ) {
 					w.log('request: ' + request.id);
 
@@ -72,17 +78,15 @@
 						case 'analyze':
 							tab = sender.tab;
 
-							var hostname, a = document.createElement('a');
-
 							a.href = tab.url;
 
 							hostname = a.hostname;
 
-							w.analyze(hostname, tab.url, request.subject);
-
-							for ( subject in request.subject ) {
-								tabCache[tab.id].analyzed.push(subject);
+							if ( headersCache[tab.url] !== undefined ) {
+								request.subject.headers = headersCache[tab.url];
 							}
+
+							w.analyze(hostname, tab.url, request.subject);
 
 							break;
 						case 'fetch_headers':
@@ -102,7 +106,7 @@
 			});
 
 			chrome.tabs.query({}, function(tabs) {
-				tabs.map(function(tab) {
+				tabs.forEach(function(tab) {
 					if ( tab.url.match(/^https?:\/\//) ) {
 						chrome.tabs.executeScript(tab.id, { file: 'js/content.js' });
 					}
@@ -115,20 +119,52 @@
 				tabCache[tabId] = null;
 			});
 
-			if ( firstRun ) {
-				driver('goToURL', { url: w.config.websiteURL + 'installed', medium: 'install' });
-					firstRun = false;
+			// Live intercept headers using webRequest API
+			chrome.webRequest.onCompleted.addListener(function(details) {
+				var responseHeaders = {};
+
+				if ( details.responseHeaders ) {
+					var uri = details.url.replace(/#.*$/, ''); // Remove hash
+
+					details.responseHeaders.forEach(function(header) {
+						responseHeaders[header.name.toLowerCase()] = header.value || '' + header.binaryValue;
+					});
+
+					if ( headersCache.length > 50 ) {
+						headersCache = {};
+					}
+
+					if ( /text\/html/.test(responseHeaders['content-type']) ) {
+						if ( headersCache[details.url] === undefined ) {
+							headersCache[details.url] = {};
+						}
+
+						for ( var header in responseHeaders ) {
+							headersCache[uri][header] = responseHeaders[header];
+						}
+					}
+
+					w.log(JSON.stringify({ uri: uri, headers: responseHeaders }));
 				}
+			}, { urls: [ 'http://*/*', 'https://*/*' ], types: [ 'main_frame' ] }, [ 'responseHeaders' ]);
+
+			if ( firstRun ) {
+				w.driver.goToURL({ url: w.config.websiteURL + 'installed', medium: 'install' });
+
+				firstRun = false;
+			}
+
 			if ( upgraded ) {
-				driver('goToURL', { url: w.config.websiteURL + 'upgraded', medium: 'upgrade' });
+				w.driver.goToURL({ url: w.config.websiteURL + 'upgraded', medium: 'upgrade', background: true });
+
 				upgraded = false;
 			}
 		},
 
 		goToURL: function(args) {
-			var url = args.url + ( typeof args.medium === 'undefined' ? '' :  '?utm_source=chrome&utm_medium=' + args.medium + '&utm_campaign=extensions');
+			var url = args.url + ( typeof args.medium === 'undefined' ? '' :  '?pk_campaign=chrome&pk_kwd=' + args.medium);
 
-			window.open(url);
+			chrome.tabs.create({ url: url, active: args.background === undefined || !args.background });
 		},
 
 		/**
@@ -140,8 +176,7 @@
 			if ( tabCache[tab.id] == null ) {
 				tabCache[tab.id] = {
 					count: 0,
-					appsDetected: [],
-					analyzed: []
+					appsDetected: []
 					};
 			}
 
@@ -152,9 +187,9 @@
 				// Find the main application to display
 				var i, appName, found = false;
 
-				w.driver.categoryOrder.map(function(match) {
+				w.driver.categoryOrder.forEach(function(match) {
 					for ( appName in w.detected[tab.url] ) {
-						w.apps[appName].cats.map(function(cat) {
+						w.apps[appName].cats.forEach(function(cat) {
 							if ( cat == match && !found ) {
 								chrome.browserAction.setIcon({ tabId: tab.id, path: 'images/icons/' + appName + '.png' });
 
@@ -181,7 +216,7 @@
 				xhr.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
 
 				xhr.onreadystatechange = function(e) {
-					if ( request.readyState == 4 ) { w.log('w.driver.ping: status ' + request.status); }
+					if ( xhr.readyState == 4 ) { w.log('w.driver.ping: status ' + xhr.status); }
 				};
 
 				xhr.send('json=' + encodeURIComponent(JSON.stringify(w.ping)));
@@ -203,6 +238,7 @@
 			18, // Web Framework
 			21, // LMS
 			 7, // Photo Gallery
+			38, // Media Server
 			 3, // Database Manager
 			34, // Database
 			 4, // Documentation Tool
@@ -216,6 +252,7 @@
 			28, // Operating System
 			15, // Comment System
 			20, // Editor
+			41, // Payment Processor
 			10, // Analytics
 			32, // Marketing Automation
 			31, // CDN
@@ -227,6 +264,9 @@
 			14, // Video Player
 			16, // Captcha
 			33, // Web Server Extension
+			37, // Network Device
+			39, // Webcam
+			40, // Printer
 			36, // Advertising Network
 			19  // Miscellaneous
 			]
